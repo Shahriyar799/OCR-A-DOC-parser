@@ -12,15 +12,15 @@
       <section class="intro">
         <p class="eyebrow">DAXİLİ İSTİFADƏ</p>
         <h1>Sənəddən məlumat çıxarışı</h1>
-        <p>PDF, pasport və anketdən aşkar olunan məlumatları strukturlaşdırın. Yekun məlumatı göndərməzdən əvvəl mütləq yoxlayın.</p>
+        <p>Bir əcnəbiyə aid PDF, pasport və anketləri birlikdə analiz edin, məlumatları yoxlayın və arayışı PDF kimi hazırlayın.</p>
       </section>
       <section class="workspace">
         <form id="upload-form" class="upload-card">
           <label class="dropzone" id="dropzone" for="file-input">
-            <input id="file-input" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required />
+            <input id="file-input" name="files" type="file" accept="application/pdf,image/png,image/jpeg" multiple required />
             <span class="upload-icon">↑</span>
-            <strong>PDF, JPG və ya PNG seçin</strong>
-            <small>Maksimum 15 MB · sənəd serverdə saxlanılmır</small>
+            <strong>Bir əcnəbiyə aid sənədləri seçin</strong>
+            <small>PDF, JPG və PNG · ən çox 8 fayl · hər fayl maksimum 15 MB</small>
             <span id="filename" class="filename"></span>
           </label>
           <button id="submit" type="submit">Məlumatları çıxar</button>
@@ -33,9 +33,27 @@
               <p class="eyebrow">NƏTİCƏ</p>
               <h2>Yoxlanılacaq sahələr</h2>
             </div>
-            <button id="copy" class="secondary" type="button">JSON kopyala</button>
+            <div class="result-actions">
+              <button id="copy" class="secondary" type="button">JSON kopyala</button>
+              <button id="certificate" class="secondary primary-action" type="button">Arayışı PDF et</button>
+            </div>
           </div>
           <div id="notes" class="notes"></div>
+          <section class="report-meta" aria-labelledby="report-meta-title">
+            <h3 id="report-meta-title">Arayışın xidməti hissəsi</h3>
+            <label>
+              Ünvanlanan şəxs və vəzifə
+              <textarea id="report-recipient" rows="3" placeholder="Məsələn: Baş idarənin rəisi ..."></textarea>
+            </label>
+            <label>
+              İmzalayanın vəzifəsi
+              <input id="manager-title" value="İdarə rəisi" autocomplete="off" />
+            </label>
+            <label>
+              İmzalayanın adı
+              <input id="manager-name" autocomplete="off" />
+            </label>
+          </section>
           <div id="fields" class="field-grid"></div>
           <details id="preview-wrap">
             <summary>Çıxarılan mətnə bax</summary>

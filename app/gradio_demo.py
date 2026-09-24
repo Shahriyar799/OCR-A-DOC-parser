@@ -24,15 +24,23 @@ def extract_for_demo(file_path: str | None) -> dict:
         # The extracted raw text may contain personal data and is not useful for this demo view.
         payload.pop("text_preview", None)
         return payload
-    except Exception as error:
-        return {"error": str(error)}
+    except Exception:  # noqa: BLE001 - do not leak provider details or document data
+        return {"error": "Sənəd oxuna bilmədi. Faylı və API sazlamalarını yoxlayın."}
 
 
 with gr.Blocks(title="Sənəd Məlumat Çıxarışı — Lokal Demo") as demo:
-    gr.Markdown("# Sənəd məlumat çıxarışı\nBu, lokal mühərrikin müvəqqəti yoxlama versiyasıdır.")
-    gr.Markdown("⚠️ Yalnız test sənədlərindən istifadə edin. Nəticəni operator yoxlamalıdır.")
+    gr.Markdown(
+        "# Sənəd məlumat çıxarışı\nBu, lokal mühərrikin müvəqqəti yoxlama versiyasıdır."
+    )
+    gr.Markdown(
+        "⚠️ Yalnız test sənədlərindən istifadə edin. Nəticəni operator yoxlamalıdır."
+    )
     with gr.Row():
-        document = gr.File(label="PDF, JPG və ya PNG", file_types=[".pdf", ".jpg", ".jpeg", ".png"], type="filepath")
+        document = gr.File(
+            label="PDF, JPG və ya PNG",
+            file_types=[".pdf", ".jpg", ".jpeg", ".png"],
+            type="filepath",
+        )
         run = gr.Button("Məlumatları çıxar", variant="primary")
     result = gr.JSON(label="Strukturlaşdırılmış nəticə")
     run.click(extract_for_demo, inputs=document, outputs=result)

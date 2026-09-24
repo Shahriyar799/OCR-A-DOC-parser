@@ -4,19 +4,30 @@ PDF, JPG və PNG faylından pasport və anket məlumatlarını strukturlaşdır�
 
 ## Hazır imkanlar
 
-- PDF / JPG / PNG yükləmə (15 MB limiti);
+- bir əcnəbiyə aid 8-dək PDF / JPG / PNG sənədini birlikdə yükləmə (hər fayl üçün 15 MB, ümumi 40 MB limiti);
 - seçilə bilən PDF mətni üçün lokal çıxarış;
 - `OPENAI_API_KEY` olduqda skan edilmiş sənədlər üçün vision analizi;
-- nəticəni form şəklində düzəltmək və JSON kimi kopyalamaq;
+- pasport, müraciət, MYİ/DYİ və arayış sahələrini form şəklində yoxlamaq və düzəltmək;
+- yoxlanılmış məlumatlardan nümunəyə uyğun iki səhifəlik A4 arayışı PDF kimi yaratmaq;
+- nəticəni JSON kimi kopyalamaq;
 - yüklənən sənəd, onun mətni və nəticəsi bazaya/fayla yazılmır;
 - `Cache-Control: no-store`, ölçü və fayl növü məhdudiyyəti.
 
 Bu MVP istənilən nəticəni avtomatik təsdiq etmir. Pasport, FIN, viza və tarixlər əməliyyatçı tərəfindən yoxlanmalıdır.
+Hüquqi nəticə sistem tərəfindən qəbul edilmir: `Nəticə`, ünvanlanan rəhbər və imzalayan şəxs sahələri operator tərəfindən yoxlanılmalı və tamamlanmalıdır.
+
+## Arayışın hazırlanması
+
+1. Eyni əcnəbiyə aid pasport, anket, qeydiyyat və digər əsas sənədləri birlikdə seçin.
+2. `Məlumatları çıxar` düyməsi ilə sahələri doldurun.
+3. Qırmızı `Tapılmadı` sahələrini sənədlə tutuşduraraq tamamlayın.
+4. Arayışın xidməti hissəsində ünvanlanan rəhbəri və imzalayan şəxsi yazın.
+5. Hüquqi nəticəni operator təsdiq etdikdən sonra `Arayışı PDF et` düyməsini seçin.
 
 ## Lokal işə salma
 
 ```bash
-cd document_intake
+cd OCR-A-DOC-parser
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -29,7 +40,7 @@ Brauzerdə `http://127.0.0.1:8000` ünvanını açın.
 ## Ayrı VPS-ə Docker ilə yerləşdirmə
 
 ```bash
-cd document_intake
+cd OCR-A-DOC-parser
 cp .env.example .env
 nano .env
 docker compose up -d --build
