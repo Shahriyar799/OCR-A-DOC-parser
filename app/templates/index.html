@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="PDF və pasport məlumatlarının təhlükəsiz çıxarılması" />
+    <title>Sənəd Məlumat Çıxarışı</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="intro">
+        <p class="eyebrow">DAXİLİ İSTİFADƏ</p>
+        <h1>Sənəddən məlumat çıxarışı</h1>
+        <p>PDF, pasport və anketdən aşkar olunan məlumatları strukturlaşdırın. Yekun məlumatı göndərməzdən əvvəl mütləq yoxlayın.</p>
+      </section>
+      <section class="workspace">
+        <form id="upload-form" class="upload-card">
+          <label class="dropzone" id="dropzone" for="file-input">
+            <input id="file-input" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required />
+            <span class="upload-icon">↑</span>
+            <strong>PDF, JPG və ya PNG seçin</strong>
+            <small>Maksimum 15 MB · sənəd serverdə saxlanılmır</small>
+            <span id="filename" class="filename"></span>
+          </label>
+          <button id="submit" type="submit">Məlumatları çıxar</button>
+          <p id="status" class="status" role="status"></p>
+        </form>
+
+        <section id="result" class="result-card" hidden aria-live="polite">
+          <div class="result-head">
+            <div>
+              <p class="eyebrow">NƏTİCƏ</p>
+              <h2>Yoxlanılacaq sahələr</h2>
+            </div>
+            <button id="copy" class="secondary" type="button">JSON kopyala</button>
+          </div>
+          <div id="notes" class="notes"></div>
+          <div id="fields" class="field-grid"></div>
+          <details id="preview-wrap">
+            <summary>Çıxarılan mətnə bax</summary>
+            <pre id="preview"></pre>
+          </details>
+        </section>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
