@@ -75,6 +75,21 @@ Bu HTTP test rejimidir. Sənəd və pasport məlumatları həssasdır: yalnız q
 üçün istifadə edin və real sənəd yükləmədən əvvəl ayrıca domen, HTTPS və operator
 girişi quraq. Son mərhələdə `8090` portunu bağlayacağıq.
 
+### Gradio HTTPS test linki
+
+İş şəbəkəsi `8090` portunu bloklayırsa, Gradio eyni çıxarış mühərrikini müvəqqəti
+`gradio.live` HTTPS linkində açır. VPS-də `.env` faylına `DEMO_PASSWORD` əlavə
+etdikdən sonra aşağıdakı əmrlə başladın:
+
+```bash
+docker compose up -d --build document-intake-demo
+docker compose logs -f document-intake-demo
+```
+
+Log-da verilən `https://*.gradio.live` ünvanı açılır və `DEMO_USER` / `DEMO_PASSWORD`
+ilə giriş tələb edir. Bu link test üçündür; daimi ünvan və ya həssas sənədlər üçün
+istifadə edilməməlidir.
+
 ### Sonrakı HTTPS konfiqurasiyası
 
 Bu ayrıca server üçün DNS-də seçdiyiniz domenin (məsələn, `docs.sizin-domain.az`)
