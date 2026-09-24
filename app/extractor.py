@@ -280,6 +280,21 @@ def vision_extract(images: list[bytes]) -> PersonData:
     )
 
 
+def merge_extractions(local_fields: PersonData, vision_fields: PersonData) -> PersonData:
+    """Keep machine-readable PDF text when vision has no value for a field.
+
+    Some PDFs contain both a selectable text layer and rendered pages.  Vision is
+    useful for scanned forms, but a blank vision response must never erase values
+    already found in the text layer.
+    """
+    merged: dict[str, ExtractedField] = {}
+    for field_name in PersonData.model_fields:
+        vision_value = getattr(vision_fields, field_name)
+        local_value = getattr(local_fields, field_name)
+        merged[field_name] = vision_value if vision_value.value else local_value
+    return PersonData(**merged)
+
+
 def analyze_documents(documents: list[tuple[bytes, str]]) -> ExtractionResponse:
     texts: list[str] = []
     images: list[bytes] = []
@@ -295,15 +310,27 @@ def analyze_documents(documents: list[tuple[bytes, str]]) -> ExtractionResponse:
 
     text = "\n".join(texts)
 
+    local_fields = local_extract(text)
+
     if os.getenv("OPENAI_API_KEY") and images:
-        fields = vision_extract(images[:12])
-        method = "vision"
-        notes = [
-            f"{len(documents)} sənəd birlikdə şəkil üzrə oxundu. Vacib sahələri sənəd əsasında yoxlayın.",
-            "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
-        ]
+        try:
+            vision_fields = vision_extract(images[:12])
+        except Exception:  # noqa: BLE001 - preserve usable PDF text when vision is unavailable
+            fields = local_fields
+            method = "local_text"
+            notes = [
+                "Şəkil üzrə oxuma əlçatan olmadı; seçilə bilən PDF mətni əsasında nəticə göstərilir.",
+                "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
+            ]
+        else:
+            fields = merge_extractions(local_fields, vision_fields)
+            method = "vision"
+            notes = [
+                f"{len(documents)} sənəd birlikdə oxundu. Vision və PDF mətni nəticələri birləşdirildi.",
+                "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
+            ]
     else:
-        fields = local_extract(text)
+        fields = local_fields
         method = "local_text"
         notes = [
             f"Vision açarı qurulmayıb; {len(documents)} sənəddə yalnız seçilə bilən PDF mətni analiz edildi.",

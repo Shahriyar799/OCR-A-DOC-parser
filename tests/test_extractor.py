@@ -1,9 +1,12 @@
 import io
 
 import pytest
+import pymupdf
 from PIL import Image
 
+from app import extractor
 from app.extractor import analyze_document, local_extract, normalize_image
+from app.schemas import PersonData
 
 
 def test_email_and_phone_are_extracted():
@@ -89,3 +92,24 @@ def test_jpeg_is_normalized_to_png_for_vision():
 def test_invalid_image_is_rejected_without_calling_vision():
     with pytest.raises(ValueError, match="zədəlidir"):
         analyze_document(b"not an image", "image/jpeg")
+
+
+def test_blank_vision_result_does_not_erase_selectable_pdf_text(monkeypatch):
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "Name: Amina Abbasova\nPassport number: P1234567\nCitizenship: Russia",
+    )
+    content = document.tobytes()
+    document.close()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(extractor, "vision_extract", lambda _images: PersonData())
+
+    result = analyze_document(content, "application/pdf")
+
+    assert result.extraction_method == "vision"
+    assert result.fields.full_name.value == "Amina Abbasova"
+    assert result.fields.passport_number.value == "P1234567"
+    assert result.fields.citizenship.value == "Russia"
