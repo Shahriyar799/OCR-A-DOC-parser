@@ -26,6 +26,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      # Gradio downloads its HTTPS-share tunnel helper here at first start.
+      - /home/appuser/.cache
     security_opt:
       - no-new-privileges:true
     logging:
