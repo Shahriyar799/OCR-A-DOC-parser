@@ -1,0 +1,19 @@
+services:
+  document-intake:
+    build: .
+    env_file: .env
+    container_name: document-intake
+    restart: unless-stopped
+    ports:
+      # Independent test endpoint. It does not use Traefik, n8n, or BiznesMəkan.
+      - "${HOST_PORT:-8090}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "2"
