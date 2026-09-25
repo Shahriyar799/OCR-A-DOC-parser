@@ -12,7 +12,11 @@ const crossChecksEl = document.querySelector('#cross-checks');
 const preview = document.querySelector('#preview');
 const copyButton = document.querySelector('#copy');
 const certificateButton = document.querySelector('#certificate');
+const certificatePreviewWrap = document.querySelector('#certificate-preview-wrap');
+const certificatePreview = document.querySelector('#certificate-preview');
+const certificateClose = document.querySelector('#certificate-close');
 let latest = null;
+let certificateUrl = null;
 
 const labels = {
   full_name: 'Ad, soyad, ata adı',
@@ -216,16 +220,26 @@ certificateButton.addEventListener('click', async () => {
       throw new Error(error.detail || 'Arayış yaradıla bilmədi.');
     }
     const blob = await response.blob();
-    const link = document.createElement('a');
-    const safeName = (values.full_name || 'ecnebi').replace(/[^\p{L}\p{N}_-]+/gu, '_');
-    link.href = URL.createObjectURL(blob);
-    link.download = `arayis_${safeName}.pdf`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    status.textContent = 'Arayış PDF-i hazırdır.';
+    if (certificateUrl) URL.revokeObjectURL(certificateUrl);
+    certificateUrl = URL.createObjectURL(blob);
+    certificatePreview.src = certificateUrl;
+    certificatePreviewWrap.hidden = false;
+    certificatePreviewWrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+    status.textContent = 'Arayışın önizləməsi hazırdır.';
   } catch (error) {
     status.textContent = error.message;
   } finally {
     certificateButton.disabled = false;
   }
+});
+
+certificateClose.addEventListener('click', () => {
+  certificatePreview.removeAttribute('src');
+  certificatePreviewWrap.hidden = true;
+  if (certificateUrl) URL.revokeObjectURL(certificateUrl);
+  certificateUrl = null;
+});
+
+window.addEventListener('beforeunload', () => {
+  if (certificateUrl) URL.revokeObjectURL(certificateUrl);
 });

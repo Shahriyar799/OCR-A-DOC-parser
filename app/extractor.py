@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -105,6 +106,11 @@ class DocumentResult:
     method: str
 
 
+_PADDLE_OCR: dict[str, object] = {}
+_PADDLE_LOCK = threading.Lock()
+_PADDLE_LANGUAGES = ("az", "ru")
+
+
 def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" :;,-")
 
@@ -196,25 +202,48 @@ def extract_pdf_pages(content: bytes) -> list[PageContent]:
     return pages
 
 
-def _ocr_image(image: bytes) -> str:
-    """Use local OCR for scanned pages before sending visual input to the LLM."""
-    try:
-        import pytesseract
-
-        with Image.open(io.BytesIO(image)) as page:
-            return pytesseract.image_to_string(
-                page,
-                lang=os.getenv("OCR_LANGUAGES", "aze+rus+eng"),
-                config="--oem 1 --psm 6",
-            )
-    except Exception:  # noqa: BLE001 - visual extraction remains available
-        return ""
-
-
 def extract_text_from_pdf(content: bytes) -> tuple[str, list[bytes]]:
     """Backward-compatible text/image helper used by existing integrations."""
     pages = extract_pdf_pages(content)
     return "\n".join(page.text for page in pages), [page.image for page in pages]
+
+
+def _ocr_image(image: bytes) -> str:
+    """Run Azerbaijani and Russian PaddleOCR locally before GPT Vision verification."""
+    global _PADDLE_OCR
+    try:
+        from paddleocr import PaddleOCR
+
+        with tempfile.NamedTemporaryFile(suffix=".png") as source:
+            source.write(image)
+            source.flush()
+            with _PADDLE_LOCK:
+                results = []
+                for language in _PADDLE_LANGUAGES:
+                    if language not in _PADDLE_OCR:
+                        _PADDLE_OCR[language] = PaddleOCR(
+                            lang=language,
+                            ocr_version="PP-OCRv5",
+                            use_doc_orientation_classify=True,
+                            use_doc_unwarping=True,
+                            use_textline_orientation=True,
+                        )
+                    results.extend(_PADDLE_OCR[language].predict(source.name))
+        text: list[str] = []
+        seen: set[str] = set()
+        for result in results:
+            payload = result.json() if callable(getattr(result, "json", None)) else result.json
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            recognized = payload.get("res", payload).get("rec_texts", [])
+            for item in recognized:
+                normalized = _clean(item)
+                if normalized and normalized not in seen:
+                    text.append(normalized)
+                    seen.add(normalized)
+        return "\n".join(text)
+    except Exception:  # noqa: BLE001 - GPT Vision remains available if local OCR fails
+        return ""
 
 
 def local_extract(
@@ -587,12 +616,12 @@ def analyze_documents(documents: list[tuple]) -> ExtractionResponse:
     if vision_unavailable:
         notes.insert(
             1,
-            "Vision əlçatan olmadı; PDF mətn və lokal OCR nəticələri saxlanıldı.",
+            "GPT Vision əlçatan olmadı; PDF mətn və lokal OCR nəticələri saxlanıldı.",
         )
     elif not os.getenv("OPENAI_API_KEY"):
         notes.insert(
             1,
-            "Vision açarı qurulmayıb; seçilə bilən PDF mətni və lokal OCR istifadə edildi.",
+            "GPT API açarı qurulmayıb; PDF mətn və lokal OCR göstərilir, skanlar üçün GPT Vision tələb olunur.",
         )
 
     return ExtractionResponse(

@@ -35,7 +35,7 @@
             </div>
             <div class="result-actions">
               <button id="copy" class="secondary" type="button">JSON kopyala</button>
-              <button id="certificate" class="secondary primary-action" type="button">Arayışı PDF et</button>
+              <button id="certificate" class="secondary primary-action" type="button">Arayışı önizlə</button>
             </div>
           </div>
           <div id="notes" class="notes"></div>
@@ -61,6 +61,13 @@
             <summary>Çıxarılan mətnə bax</summary>
             <pre id="preview"></pre>
           </details>
+          <section id="certificate-preview-wrap" class="certificate-preview" hidden aria-live="polite">
+            <div class="certificate-preview-head">
+              <h3>Arayışın önizləməsi</h3>
+              <button id="certificate-close" class="secondary" type="button">Bağla</button>
+            </div>
+            <iframe id="certificate-preview" title="Arayışın PDF önizləməsi"></iframe>
+          </section>
         </section>
       </section>
     </main>
