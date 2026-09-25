@@ -10,6 +10,9 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir paddlepaddle==3.2.0 \
     && pip install --no-cache-dir -r requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 COPY app ./app
 RUN useradd --create-home appuser \
     && mkdir -p /home/appuser/.cache/huggingface/gradio/frpc /home/appuser/.cache/paddlex \
