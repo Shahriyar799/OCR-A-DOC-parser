@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .certificate import build_certificate_pdf
-from .extractor import analyze_document, analyze_documents
+from .extractor import analyze_documents
 from .schemas import CertificateData, ExtractionResponse
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -42,8 +42,8 @@ async def health():
 
 @app.post("/api/extract", response_model=ExtractionResponse)
 async def extract_document(file: Annotated[UploadFile, File()]):
-    content, content_type = await _read_upload(file)
-    return _analyze_or_error([(content, content_type)])
+    document = await _read_upload(file)
+    return _analyze_or_error([document])
 
 
 @app.post("/api/extract-many", response_model=ExtractionResponse)
@@ -55,16 +55,16 @@ async def extract_many(files: Annotated[list[UploadFile], File()]):
             413, f"Bir əcnəbi üçün ən çox {MAX_FILES_PER_PERSON} sənəd yüklənə bilər."
         )
 
-    documents: list[tuple[bytes, str]] = []
+    documents: list[tuple[bytes, str, str]] = []
     total_size = 0
     for file in files:
-        content, content_type = await _read_upload(file)
+        content, content_type, filename = await _read_upload(file)
         total_size += len(content)
         if total_size > MAX_TOTAL_BYTES:
             raise HTTPException(
                 413, "Sənədlərin ümumi ölçüsü 40 MB-dan çox ola bilməz."
             )
-        documents.append((content, content_type))
+        documents.append((content, content_type, filename))
     return _analyze_or_error(documents)
 
 
@@ -83,7 +83,7 @@ async def create_certificate(data: CertificateData):
     )
 
 
-async def _read_upload(file: UploadFile) -> tuple[bytes, str]:
+async def _read_upload(file: UploadFile) -> tuple[bytes, str, str]:
     content_type = file.content_type or ""
     if content_type not in ALLOWED_TYPES:
         raise HTTPException(415, "Yalnız PDF, JPG və PNG faylları yüklənə bilər.")
@@ -95,13 +95,11 @@ async def _read_upload(file: UploadFile) -> tuple[bytes, str]:
             413,
             f"Fayl ölçüsü {MAX_UPLOAD_BYTES // 1024 // 1024} MB-dan çox ola bilməz.",
         )
-    return content, content_type
+    return content, content_type, file.filename or "sənəd"
 
 
-def _analyze_or_error(documents: list[tuple[bytes, str]]) -> ExtractionResponse:
+def _analyze_or_error(documents: list[tuple[bytes, str, str]]) -> ExtractionResponse:
     try:
-        if len(documents) == 1:
-            return analyze_document(*documents[0])
         return analyze_documents(documents)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error

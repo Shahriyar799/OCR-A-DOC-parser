@@ -7,6 +7,21 @@ class ExtractedField(BaseModel):
     value: str = ""
     confidence: Literal["high", "medium", "low", "not_found"] = "not_found"
     source: str = ""
+    source_page: int | None = None
+
+
+class DocumentSummary(BaseModel):
+    name: str
+    document_type: str = "naməlum"
+    page_count: int = 1
+    extraction_method: Literal["vision", "ocr", "pdf_text"] = "pdf_text"
+
+
+class CrossCheck(BaseModel):
+    field: str
+    status: Literal["match", "conflict", "single_source", "missing"]
+    message: str
+    sources: list[str] = Field(default_factory=list)
 
 
 class PersonData(BaseModel):
@@ -40,6 +55,8 @@ class ExtractionResponse(BaseModel):
     extraction_method: Literal["vision", "local_text"]
     notes: list[str] = Field(default_factory=list)
     text_preview: str = ""
+    documents: list[DocumentSummary] = Field(default_factory=list)
+    cross_checks: list[CrossCheck] = Field(default_factory=list)
 
 
 class CertificateData(BaseModel):

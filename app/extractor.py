@@ -3,11 +3,21 @@ import io
 import json
 import os
 import re
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
 import pymupdf
 from PIL import Image
 
-from .schemas import ExtractedField, ExtractionResponse, PersonData
+from .schemas import (
+    CrossCheck,
+    DocumentSummary,
+    ExtractedField,
+    ExtractionResponse,
+    PersonData,
+)
 
 FIELD_LABELS = {
     "full_name": r"^(?:soyad[ıi]?\s*,?\s*ad[ıi]?\s*,?\s*ata\s*ad[ıi]?|ad[ıi]?\s*,?\s*soyad[ıi]?\s*,?\s*ata\s*ad[ıi]?|full\s*name|name|ad[ıi]?\b|фамилия.*имя)[ \t]*[:\-]?[ \t]*([^\n]{3,100})",
@@ -35,60 +45,64 @@ FIELD_LABELS = {
 }
 
 
+FIELD_NAMES = tuple(PersonData.model_fields)
+DOCUMENT_TYPES = (
+    "passport",
+    "application_form",
+    "birth_certificate",
+    "medical_certificate",
+    "school_certificate",
+    "notarized_application",
+    "property_document",
+    "residence_permit",
+    "reference_letter",
+    "other",
+)
+
+VISION_FIELD_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "value": {"type": "string"},
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low", "not_found"],
+        },
+        "source_page": {"type": "integer", "minimum": 0},
+    },
+    "required": ["value", "confidence", "source_page"],
+}
+
 VISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "full_name": {"type": "string"},
-        "application_date": {"type": "string"},
-        "date_of_birth": {"type": "string"},
-        "birth_place": {"type": "string"},
-        "sex": {"type": "string"},
-        "citizenship": {"type": "string"},
-        "personal_id": {"type": "string"},
-        "passport_number": {"type": "string"},
-        "passport_issuer": {"type": "string"},
-        "passport_issue_date": {"type": "string"},
-        "passport_expiry": {"type": "string"},
-        "visa_number": {"type": "string"},
-        "entry_date": {"type": "string"},
-        "phone": {"type": "string"},
-        "email": {"type": "string"},
-        "address": {"type": "string"},
-        "application_type": {"type": "string"},
-        "permit_basis": {"type": "string"},
-        "basis_note": {"type": "string"},
-        "special_note": {"type": "string"},
-        "temporary_permit_history": {"type": "string"},
-        "permanent_permit_history": {"type": "string"},
-        "conclusion": {"type": "string"},
+        "document_type": {"type": "string", "enum": list(DOCUMENT_TYPES)},
+        "fields": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {name: VISION_FIELD_SCHEMA for name in FIELD_NAMES},
+            "required": list(FIELD_NAMES),
+        },
     },
-    "required": [
-        "full_name",
-        "application_date",
-        "date_of_birth",
-        "birth_place",
-        "sex",
-        "citizenship",
-        "personal_id",
-        "passport_number",
-        "passport_issuer",
-        "passport_issue_date",
-        "passport_expiry",
-        "visa_number",
-        "entry_date",
-        "phone",
-        "email",
-        "address",
-        "application_type",
-        "permit_basis",
-        "basis_note",
-        "special_note",
-        "temporary_permit_history",
-        "permanent_permit_history",
-        "conclusion",
-    ],
+    "required": ["document_type", "fields"],
 }
+
+
+@dataclass(frozen=True)
+class PageContent:
+    image: bytes
+    page_number: int
+    text: str
+
+
+@dataclass(frozen=True)
+class DocumentResult:
+    name: str
+    document_type: str
+    pages: list[PageContent]
+    fields: PersonData
+    method: str
 
 
 def _clean(value: str) -> str:
@@ -125,18 +139,87 @@ def normalize_image(content: bytes) -> bytes:
         raise ValueError("Şəkil faylı zədəlidir və ya dəstəklənmir.") from error
 
 
-def extract_text_from_pdf(content: bytes) -> tuple[str, list[bytes]]:
+def _render_pdf_with_poppler(content: bytes, page_count: int) -> list[bytes]:
+    """Render every PDF page at OCR quality with Poppler when it is available."""
+    max_pages = min(page_count, int(os.getenv("MAX_PDF_PAGES", "13")))
+    with tempfile.TemporaryDirectory(prefix="document-intake-") as folder:
+        folder_path = Path(folder)
+        pdf_path = folder_path / "source.pdf"
+        output_prefix = folder_path / "page"
+        pdf_path.write_bytes(content)
+        try:
+            completed = subprocess.run(
+                [
+                    "pdftoppm",
+                    "-png",
+                    "-r",
+                    os.getenv("PDF_RENDER_DPI", "220"),
+                    "-f",
+                    "1",
+                    "-l",
+                    str(max_pages),
+                    str(pdf_path),
+                    str(output_prefix),
+                ],
+                check=False,
+                capture_output=True,
+                timeout=120,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []
+        if completed.returncode != 0:
+            return []
+        files = sorted(
+            folder_path.glob("page-*.png"),
+            key=lambda path: int(path.stem.rsplit("-", maxsplit=1)[1]),
+        )
+        return [path.read_bytes() for path in files]
+
+
+def extract_pdf_pages(content: bytes) -> list[PageContent]:
     document = pymupdf.open(stream=content, filetype="pdf")
-    text = "\n".join(page.get_text("text") for page in document)
-    images: list[bytes] = []
-    for page in list(document)[:3]:
-        pix = page.get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5), alpha=False)
-        images.append(pix.tobytes("png"))
+    page_count = min(document.page_count, int(os.getenv("MAX_PDF_PAGES", "13")))
+    rendered = _render_pdf_with_poppler(content, page_count)
+    pages: list[PageContent] = []
+    for index in range(page_count):
+        page = document[index]
+        if index < len(rendered):
+            image = rendered[index]
+        else:
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
+            image = pix.tobytes("png")
+        text = page.get_text("text")
+        if len(_clean(text)) < 30:
+            text = f"{text}\n{_ocr_image(image)}"
+        pages.append(PageContent(image=image, page_number=index + 1, text=text))
     document.close()
-    return text, images
+    return pages
 
 
-def local_extract(text: str) -> PersonData:
+def _ocr_image(image: bytes) -> str:
+    """Use local OCR for scanned pages before sending visual input to the LLM."""
+    try:
+        import pytesseract
+
+        with Image.open(io.BytesIO(image)) as page:
+            return pytesseract.image_to_string(
+                page,
+                lang=os.getenv("OCR_LANGUAGES", "aze+rus+eng"),
+                config="--oem 1 --psm 6",
+            )
+    except Exception:  # noqa: BLE001 - visual extraction remains available
+        return ""
+
+
+def extract_text_from_pdf(content: bytes) -> tuple[str, list[bytes]]:
+    """Backward-compatible text/image helper used by existing integrations."""
+    pages = extract_pdf_pages(content)
+    return "\n".join(page.text for page in pages), [page.image for page in pages]
+
+
+def local_extract(
+    text: str, *, source: str = "PDF/OCR mətni", source_page: int | None = None
+) -> PersonData:
     normalized = _normalize_text(text)
     values: dict[str, ExtractedField] = {}
     for key, pattern in FIELD_LABELS.items():
@@ -145,7 +228,8 @@ def local_extract(text: str) -> PersonData:
         values[key] = ExtractedField(
             value=value,
             confidence="medium" if value else "not_found",
-            source="PDF mətni" if value else "",
+            source=source if value else "",
+            source_page=source_page if value else None,
         )
     sex_match = re.search(
         r"^(?:cins[ıi]?|sex|gender|пол)[ \t]*[:\-]?[ \t]*(qadın|kişi|female|male|f|m|жен|муж)[^\n]*",
@@ -155,7 +239,8 @@ def local_extract(text: str) -> PersonData:
     values["sex"] = ExtractedField(
         value=_clean(sex_match.group(1)) if sex_match else "",
         confidence="medium" if sex_match else "not_found",
-        source="PDF mətni" if sex_match else "",
+        source=source if sex_match else "",
+        source_page=source_page if sex_match else None,
     )
 
     combined_birth = re.search(
@@ -167,12 +252,14 @@ def local_extract(text: str) -> PersonData:
         values["date_of_birth"] = ExtractedField(
             value=_clean(combined_birth.group(1)),
             confidence="medium",
-            source="PDF mətni",
+            source=source,
+            source_page=source_page,
         )
         values["birth_place"] = ExtractedField(
             value=_clean(combined_birth.group(2)),
             confidence="medium",
-            source="PDF mətni",
+            source=source,
+            source_page=source_page,
         )
 
     heading_name = re.search(
@@ -184,7 +271,8 @@ def local_extract(text: str) -> PersonData:
         values["full_name"] = ExtractedField(
             value=_clean(heading_name.group(1)),
             confidence="medium",
-            source="PDF mətni",
+            source=source,
+            source_page=source_page,
         )
 
     combined_passport_dates = re.search(
@@ -196,12 +284,14 @@ def local_extract(text: str) -> PersonData:
         values["passport_issue_date"] = ExtractedField(
             value=f"{_clean(combined_passport_dates.group(1))} il",
             confidence="medium",
-            source="PDF mətni",
+            source=source,
+            source_page=source_page,
         )
         values["passport_expiry"] = ExtractedField(
             value=f"{_clean(combined_passport_dates.group(2))} il",
             confidence="medium",
-            source="PDF mətni",
+            source=source,
+            source_page=source_page,
         )
 
     for key, start_label, end_label in [
@@ -222,7 +312,8 @@ def local_extract(text: str) -> PersonData:
             values[key] = ExtractedField(
                 value=_clean(block.group(1)),
                 confidence="medium",
-                source="PDF mətni",
+                source=source,
+                source_page=source_page,
             )
     return PersonData(**values)
 
@@ -236,26 +327,37 @@ def _image_part(image_bytes: bytes) -> dict:
     }
 
 
-def vision_extract(images: list[bytes]) -> PersonData:
+def vision_extract(pages: list[PageContent], document_name: str) -> tuple[str, PersonData]:
     from openai import OpenAI
 
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     prompt = (
-        "Sən miqrasiya sənədlərindən məlumat çıxaran köməkçisən. Şəkillərdəki "
-        "anket, pasport, qeydiyyat, MYİ və DYİ məlumatlarını oxu. Bir neçə şəkil eyni "
-        "şəxsə aid ola bilər. Yalnız açıq görünən məlumatı yaz; təxmin etmə və hüquqi "
-        "nəticə yaratma. Nəticə yalnız sənəddə açıq yazılıbsa çıxarılsın. Tarixləri "
-        "sənəddəki formada saxla. Sahə yoxdursa boş sətir qaytar."
+        "Sən miqrasiya sənədlərini vizual oxuyan dəqiq sənəd-analitika köməkçisisən. "
+        "Bu bir sənədə aid səhifələrdir. Sənədin növünü tanı: passport, application_form, "
+        "birth_certificate, medical_certificate, school_certificate, notarized_application, "
+        "property_document, residence_permit, reference_letter və ya other. Çap mətnini, "
+        "cədvəl/xana başlıqlarını, pasportdakı MRZ sətrini və oxuna bilən əlyazmanı birlikdə "
+        "dəyərləndir. Yalnız aydın görünən məlumatı yaz, təxmin etmə və hüquqi nəticə uydurma. "
+        "Hər dolu sahə üçün həmin məlumatın göründüyü source_page nömrəsini qaytar; tapılmadıqda "
+        "value boş, confidence not_found, source_page 0 yaz. Tarixləri sənəddəki formada saxla."
     )
+    content: list[dict] = [{"type": "input_text", "text": prompt}]
+    for page in pages:
+        content.extend(
+            [
+                {
+                    "type": "input_text",
+                    "text": f"Sənəd: {document_name}; bu, source_page {page.page_number}-dir.",
+                },
+                _image_part(page.image),
+            ]
+        )
     response = client.responses.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         input=[
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    *[_image_part(i) for i in images],
-                ],
+                "content": content,
             }
         ],
         text={
@@ -268,14 +370,19 @@ def vision_extract(images: list[bytes]) -> PersonData:
         },
     )
     raw = json.loads(response.output_text)
-    return PersonData(
+    document_type = raw["document_type"]
+    fields = raw["fields"]
+    return document_type, PersonData(
         **{
             key: ExtractedField(
-                value=_clean(value),
-                confidence="high" if _clean(value) else "not_found",
-                source="Sənəd şəkli",
+                value=_clean(value["value"]),
+                confidence=value["confidence"] if _clean(value["value"]) else "not_found",
+                source=f"{document_name} · Vision ({document_type})"
+                if _clean(value["value"])
+                else "",
+                source_page=value["source_page"] or None,
             )
-            for key, value in raw.items()
+            for key, value in fields.items()
         }
     )
 
@@ -295,53 +402,214 @@ def merge_extractions(local_fields: PersonData, vision_fields: PersonData) -> Pe
     return PersonData(**merged)
 
 
-def analyze_documents(documents: list[tuple[bytes, str]]) -> ExtractionResponse:
-    texts: list[str] = []
-    images: list[bytes] = []
-    for content, content_type in documents:
-        if content_type == "application/pdf":
-            document_text, document_images = extract_text_from_pdf(content)
-            texts.append(document_text)
-            images.extend(document_images)
-        elif content_type.startswith("image/"):
-            images.append(normalize_image(content))
-        else:
-            raise ValueError("Yalnız PDF, JPG və PNG faylları qəbul edilir.")
+def _merge_field_sets(field_sets: list[PersonData]) -> PersonData:
+    merged: dict[str, ExtractedField] = {}
+    for field_name in FIELD_NAMES:
+        merged[field_name] = next(
+            (
+                getattr(fields, field_name)
+                for fields in field_sets
+                if getattr(fields, field_name).value
+            ),
+            ExtractedField(),
+        )
+    return PersonData(**merged)
 
-    text = "\n".join(texts)
 
-    local_fields = local_extract(text)
+def _classify_document_from_text(text: str) -> str:
+    normalized = _normalize_text(text).lower()
+    if "arayış" in normalized or "reference" in normalized:
+        return "reference_letter"
+    if "passport" in normalized or "pasport" in normalized or "p<" in normalized:
+        return "passport"
+    if "doğum şəhadətnaməsi" in normalized or "birth certificate" in normalized:
+        return "birth_certificate"
+    if "tibbi" in normalized or "medical" in normalized:
+        return "medical_certificate"
+    if "məktəb" in normalized or "school" in normalized:
+        return "school_certificate"
+    if "notarial" in normalized or "notary" in normalized:
+        return "notarized_application"
+    if "daşınmaz" in normalized or "əmlak" in normalized or "property" in normalized:
+        return "property_document"
+    if "ərizə" in normalized or "anket" in normalized or "application" in normalized:
+        return "application_form"
+    return "other"
 
-    if os.getenv("OPENAI_API_KEY") and images:
-        try:
-            vision_fields = vision_extract(images[:12])
-        except Exception:  # noqa: BLE001 - preserve usable PDF text when vision is unavailable
-            fields = local_fields
-            method = "local_text"
-            notes = [
-                "Şəkil üzrə oxuma əlçatan olmadı; seçilə bilən PDF mətni əsasında nəticə göstərilir.",
-                "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
-            ]
-        else:
-            fields = merge_extractions(local_fields, vision_fields)
-            method = "vision"
-            notes = [
-                f"{len(documents)} sənəd birlikdə oxundu. Vision və PDF mətni nəticələri birləşdirildi.",
-                "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
-            ]
+
+def _analyze_single_document(
+    content: bytes, content_type: str, document_name: str
+) -> DocumentResult:
+    if content_type == "application/pdf":
+        pages = extract_pdf_pages(content)
+    elif content_type.startswith("image/"):
+        image = normalize_image(content)
+        pages = [PageContent(image=image, page_number=1, text=_ocr_image(image))]
     else:
-        fields = local_fields
-        method = "local_text"
-        notes = [
-            f"Vision açarı qurulmayıb; {len(documents)} sənəddə yalnız seçilə bilən PDF mətni analiz edildi.",
-            "Skan edilmiş pasport/anket üçün OPENAI_API_KEY əlavə edin.",
+        raise ValueError("Yalnız PDF, JPG və PNG faylları qəbul edilir.")
+
+    local_by_page = [
+        local_extract(
+            page.text,
+            source=f"{document_name} · PDF/OCR mətni",
+            source_page=page.page_number,
+        )
+        for page in pages
+    ]
+    full_document_text = "\n".join(page.text for page in pages)
+    local_fields = _merge_field_sets(
+        [*local_by_page, local_extract(full_document_text, source=f"{document_name} · PDF/OCR mətni")]
+    )
+    document_type = _classify_document_from_text(full_document_text)
+
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            vision_type, vision_fields = vision_extract(pages, document_name)
+        except Exception:  # noqa: BLE001 - retain OCR/PDF data when vision is unavailable
+            return DocumentResult(
+                name=document_name,
+                document_type=document_type,
+                pages=pages,
+                fields=local_fields,
+                method="ocr" if any(page.text for page in pages) else "pdf_text",
+            )
+        return DocumentResult(
+            name=document_name,
+            document_type=vision_type,
+            pages=pages,
+            fields=merge_extractions(local_fields, vision_fields),
+            method="vision",
+        )
+
+    return DocumentResult(
+        name=document_name,
+        document_type=document_type,
+        pages=pages,
+        fields=local_fields,
+        method="ocr" if any(page.text for page in pages) else "pdf_text",
+    )
+
+
+FIELD_DOCUMENT_PRIORITY = {
+    "passport_number": ("passport",),
+    "passport_issuer": ("passport",),
+    "passport_issue_date": ("passport",),
+    "passport_expiry": ("passport",),
+    "personal_id": ("passport", "residence_permit"),
+    "date_of_birth": ("passport", "birth_certificate", "application_form"),
+    "birth_place": ("passport", "birth_certificate", "application_form"),
+}
+CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1, "not_found": 0}
+
+
+def _merge_document_results(documents: list[DocumentResult]) -> PersonData:
+    values: dict[str, ExtractedField] = {}
+    for field_name in FIELD_NAMES:
+        candidates = [
+            (document, getattr(document.fields, field_name))
+            for document in documents
+            if getattr(document.fields, field_name).value
         ]
+        preferred_types = FIELD_DOCUMENT_PRIORITY.get(field_name, ())
+        candidates.sort(
+            key=lambda item: (
+                item[0].document_type in preferred_types,
+                CONFIDENCE_WEIGHT[item[1].confidence],
+            ),
+            reverse=True,
+        )
+        values[field_name] = candidates[0][1] if candidates else ExtractedField()
+    return PersonData(**values)
+
+
+def _comparison_value(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", _normalize_text(value).lower())
+
+
+def build_cross_checks(documents: list[DocumentResult]) -> list[CrossCheck]:
+    checks: list[CrossCheck] = []
+    for field_name in (
+        "full_name",
+        "passport_number",
+        "passport_issue_date",
+        "personal_id",
+        "date_of_birth",
+    ):
+        found: dict[str, list[str]] = {}
+        for document in documents:
+            field = getattr(document.fields, field_name)
+            if not field.value:
+                continue
+            found.setdefault(_comparison_value(field.value), []).append(
+                f"{document.name}, səhifə {field.source_page or '?'}: {field.value}"
+            )
+        values = list(found.values())
+        if not values:
+            status = "missing"
+            message = "Məlumat sənədlərdə tapılmadı."
+        elif len(values) == 1 and len(values[0]) > 1:
+            status = "match"
+            message = "Bir neçə sənəddə eyni məlumat təsdiqləndi."
+        elif len(values) > 1:
+            status = "conflict"
+            message = "Sənədlər arasında uyğunsuzluq var; operator yoxlamalıdır."
+        else:
+            status = "single_source"
+            message = "Yalnız bir sənəd mənbəsində tapıldı."
+        checks.append(
+            CrossCheck(
+                field=field_name,
+                status=status,
+                message=message,
+                sources=[source for group in values for source in group],
+            )
+        )
+    return checks
+
+
+def analyze_documents(documents: list[tuple]) -> ExtractionResponse:
+    analyzed: list[DocumentResult] = []
+    for index, document in enumerate(documents, start=1):
+        content, content_type, *rest = document
+        name = rest[0] if rest else f"Sənəd {index}"
+        analyzed.append(_analyze_single_document(content, content_type, name))
+
+    all_text = "\n".join(
+        page.text for document in analyzed for page in document.pages if page.text
+    )
+    used_vision = any(document.method == "vision" for document in analyzed)
+    vision_unavailable = bool(os.getenv("OPENAI_API_KEY")) and not used_vision
+    notes = [
+        f"{len(analyzed)} sənəd və {sum(len(document.pages) for document in analyzed)} səhifə analiz edildi.",
+        "Pasport nömrəsi, şəxsi kod, ad-soyad və doğum tarixi üzrə çarpaz yoxlama nəticələrini nəzərdən keçirin.",
+        "Hüquqi nəticə avtomatik qəbul edilmir; operator tərəfindən yoxlanılmalıdır.",
+    ]
+    if vision_unavailable:
+        notes.insert(
+            1,
+            "Vision əlçatan olmadı; PDF mətn və lokal OCR nəticələri saxlanıldı.",
+        )
+    elif not os.getenv("OPENAI_API_KEY"):
+        notes.insert(
+            1,
+            "Vision açarı qurulmayıb; seçilə bilən PDF mətni və lokal OCR istifadə edildi.",
+        )
 
     return ExtractionResponse(
-        fields=fields,
-        extraction_method=method,
+        fields=_merge_document_results(analyzed),
+        extraction_method="vision" if used_vision else "local_text",
         notes=notes,
-        text_preview=_clean(text)[:2500],
+        text_preview=_clean(all_text)[:2500],
+        documents=[
+            DocumentSummary(
+                name=document.name,
+                document_type=document.document_type,
+                page_count=len(document.pages),
+                extraction_method=document.method,
+            )
+            for document in analyzed
+        ],
+        cross_checks=build_cross_checks(analyzed),
     )
 
 

@@ -71,6 +71,40 @@ def test_multiple_documents_are_combined_for_one_person(monkeypatch):
     assert "+994" in payload["fields"]["phone"]["value"]
 
 
+def test_cross_check_marks_conflicting_passport_issue_dates(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    response = client.post(
+        "/api/extract-many",
+        files=[
+            (
+                "files",
+                (
+                    "application.pdf",
+                    _text_pdf(
+                        "Passport number: P1234567\nDate of issue: 01.01.2020"
+                    ),
+                    "application/pdf",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "passport.pdf",
+                    _text_pdf(
+                        "Passport number: P1234567\nDate of issue: 02.01.2020"
+                    ),
+                    "application/pdf",
+                ),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    checks = {item["field"]: item for item in response.json()["cross_checks"]}
+    assert checks["passport_number"]["status"] == "match"
+    assert checks["passport_issue_date"]["status"] == "conflict"
+
+
 def test_certificate_endpoint_returns_a_two_page_pdf():
     response = client.post(
         "/api/certificate",

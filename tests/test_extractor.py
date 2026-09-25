@@ -105,7 +105,9 @@ def test_blank_vision_result_does_not_erase_selectable_pdf_text(monkeypatch):
     document.close()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(extractor, "vision_extract", lambda _images: PersonData())
+    monkeypatch.setattr(
+        extractor, "vision_extract", lambda _pages, _name: ("other", PersonData())
+    )
 
     result = analyze_document(content, "application/pdf")
 

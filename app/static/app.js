@@ -7,6 +7,8 @@ const submit = document.querySelector('#submit');
 const result = document.querySelector('#result');
 const fieldsEl = document.querySelector('#fields');
 const notesEl = document.querySelector('#notes');
+const documentSummaryEl = document.querySelector('#document-summary');
+const crossChecksEl = document.querySelector('#cross-checks');
 const preview = document.querySelector('#preview');
 const copyButton = document.querySelector('#copy');
 const certificateButton = document.querySelector('#certificate');
@@ -36,6 +38,13 @@ const labels = {
   temporary_permit_history: 'MYİ müraciət tarixçəsi',
   permanent_permit_history: 'DYİ müraciət tarixçəsi',
   conclusion: 'Nəticə',
+};
+
+const documentTypeLabels = {
+  passport: 'Pasport', application_form: 'Ərizə / anket', birth_certificate: 'Doğum şəhadətnaməsi',
+  medical_certificate: 'Tibbi arayış', school_certificate: 'Məktəb arayışı',
+  notarized_application: 'Notarial ərizə', property_document: 'Daşınmaz əmlak sənədi',
+  residence_permit: 'Yaşayış icazəsi', reference_letter: 'Arayış', other: 'Digər sənəd',
 };
 
 const longFields = new Set([
@@ -84,11 +93,43 @@ function render(data) {
   result.hidden = false;
   fieldsEl.innerHTML = '';
   notesEl.innerHTML = '';
+  documentSummaryEl.innerHTML = '';
+  crossChecksEl.innerHTML = '';
   data.notes.forEach(noteText => {
     const note = document.createElement('p');
     note.textContent = noteText;
     notesEl.append(note);
   });
+
+  if (data.documents?.length) {
+    const title = document.createElement('h3');
+    title.textContent = 'Tanınan sənədlər';
+    const list = document.createElement('ul');
+    data.documents.forEach(documentInfo => {
+      const item = document.createElement('li');
+      item.textContent = `${documentInfo.name}: ${documentTypeLabels[documentInfo.document_type] || documentInfo.document_type} · ${documentInfo.page_count} səhifə · ${documentInfo.extraction_method}`;
+      list.append(item);
+    });
+    documentSummaryEl.append(title, list);
+  }
+
+  if (data.cross_checks?.length) {
+    const title = document.createElement('h3');
+    title.textContent = 'Sənədlərarası yoxlama';
+    crossChecksEl.append(title);
+    data.cross_checks.forEach(check => {
+      const item = document.createElement('article');
+      item.className = `cross-check ${check.status}`;
+      const field = document.createElement('strong');
+      field.textContent = labels[check.field] || check.field;
+      const message = document.createElement('p');
+      message.textContent = check.message;
+      const sources = document.createElement('small');
+      sources.textContent = check.sources.join(' | ') || 'Mənbə tapılmadı';
+      item.append(field, message, sources);
+      crossChecksEl.append(item);
+    });
+  }
 
   Object.entries(data.fields).forEach(([key, field]) => {
     const box = document.createElement('div');
@@ -105,7 +146,7 @@ function render(data) {
     confidence.className = `confidence ${field.confidence}`;
     confidence.textContent = field.confidence === 'not_found'
       ? 'Tapılmadı - operator doldurmalıdır'
-      : `Etibar: ${field.confidence}`;
+      : `Etibar: ${field.confidence} · ${field.source || 'mənbə göstərilməyib'}${field.source_page ? ` · səhifə ${field.source_page}` : ''}`;
     box.append(label, value, confidence);
     fieldsEl.append(box);
   });
