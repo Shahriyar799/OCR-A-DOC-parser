@@ -8,7 +8,7 @@ RUN apt-get update \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
+RUN pip install --no-cache-dir paddlepaddle==3.2.0 \
     && pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 RUN useradd --create-home appuser \
