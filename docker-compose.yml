@@ -4,6 +4,10 @@ services:
     env_file: .env
     container_name: document-intake
     restart: unless-stopped
+    environment:
+      # The root filesystem is intentionally read-only; PaddleOCR stores its
+      # downloaded language models in the writable /tmp tmpfs at runtime.
+      PADDLE_PDX_CACHE_HOME: /tmp/paddlex
     ports:
       # Independent test endpoint. It does not use Traefik, n8n, or BiznesMəkan.
       - "${HOST_PORT:-8090}:8000"
