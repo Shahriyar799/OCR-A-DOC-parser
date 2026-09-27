@@ -14,8 +14,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 # Source files must remain importable after dropping root privileges, even if
-# an editor checked a file out with owner-only permissions.
-COPY --chmod=644 app ./app
+# an editor checked a file out with owner-only permissions. `X` preserves
+# traversal on directories without marking ordinary Python files executable.
+COPY app ./app
+RUN chmod -R a+rX /app/app
 RUN useradd --create-home appuser \
     && mkdir -p /home/appuser/.cache/huggingface/gradio/frpc /home/appuser/.cache/paddlex \
     && python -c "from urllib.request import urlretrieve; urlretrieve('https://cdn-media.huggingface.co/frpc-gradio-0.3/frpc_linux_amd64', '/home/appuser/.cache/huggingface/gradio/frpc/frpc_linux_amd64_v0.3')" \
