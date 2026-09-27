@@ -99,6 +99,21 @@ def _sex_label(value: str) -> str:
     return value
 
 
+def _country_label(value: str) -> str:
+    """Show common OCR/transliteration variants as the official AZ country name."""
+    normalized = " ".join(value.casefold().split())
+    if normalized in {
+        "rusija",
+        "rusiya",
+        "russian federation",
+        "russia",
+        "россия",
+        "российская федерация",
+    }:
+        return "Rusiya Federasiyası"
+    return value
+
+
 def _cross_checks_html(payload: dict) -> str:
     rows = []
     label_map = {
@@ -171,9 +186,9 @@ def _form_values(file_path: str | None) -> tuple:
         last_name,
         full_name,
         "",
-        _value(payload, "citizenship"),
+        _country_label(_value(payload, "citizenship")),
         _value(payload, "date_of_birth"),
-        _value(payload, "birth_place"),
+        _country_label(_value(payload, "birth_place")),
         _sex_label(_value(payload, "sex")),
         _value(payload, "application_type"),
         _value(payload, "permit_basis"),
