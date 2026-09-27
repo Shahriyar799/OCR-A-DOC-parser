@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import logging
 import os
 import re
 import subprocess
@@ -109,6 +110,7 @@ class DocumentResult:
 _PADDLE_OCR: dict[str, object] = {}
 _PADDLE_LOCK = threading.Lock()
 _PADDLE_LANGUAGES = ("az", "ru")
+LOGGER = logging.getLogger(__name__)
 
 
 def _clean(value: str) -> str:
@@ -503,7 +505,15 @@ def _analyze_single_document(
     if os.getenv("OPENAI_API_KEY"):
         try:
             vision_type, vision_fields = vision_extract(pages, document_name)
-        except Exception:  # noqa: BLE001 - retain OCR/PDF data when vision is unavailable
+        except Exception as error:  # noqa: BLE001 - retain OCR/PDF data when vision is unavailable
+            # No document text, names, or credentials are logged. The error
+            # class/status is enough to diagnose the provider configuration.
+            LOGGER.warning(
+                "Vision extraction unavailable; falling back to local OCR "
+                "(error_type=%s, status=%s)",
+                type(error).__name__,
+                getattr(error, "status_code", None),
+            )
             return DocumentResult(
                 name=document_name,
                 document_type=document_type,
