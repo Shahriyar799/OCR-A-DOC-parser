@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir paddlepaddle==3.2.0 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-COPY app ./app
+# Source files must remain importable after dropping root privileges, even if
+# an editor checked a file out with owner-only permissions.
+COPY --chmod=644 app ./app
 RUN useradd --create-home appuser \
     && mkdir -p /home/appuser/.cache/huggingface/gradio/frpc /home/appuser/.cache/paddlex \
     && python -c "from urllib.request import urlretrieve; urlretrieve('https://cdn-media.huggingface.co/frpc-gradio-0.3/frpc_linux_amd64', '/home/appuser/.cache/huggingface/gradio/frpc/frpc_linux_amd64_v0.3')" \
