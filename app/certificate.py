@@ -134,6 +134,31 @@ def build_certificate_pdf(data: CertificateData) -> bytes:
             ),
         )
 
+    def history_table(title_text: str, headers: list[str], history: str) -> list:
+        """Match the reference arayış layout while keeping free-text history usable."""
+        header_cells = [Paragraph(header, bold) for header in headers]
+        if history.strip():
+            value_cells = [Paragraph(_text(history), body)] + ["" for _ in headers[1:]]
+        else:
+            value_cells = ["" for _ in headers]
+        table = Table(
+            [header_cells, value_cells],
+            colWidths=[document.width / len(headers)] * len(headers),
+            repeatRows=1,
+        )
+        style = [
+            ("GRID", (0, 0), (-1, -1), 0.45, colors.HexColor("#222222")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+        ]
+        if history.strip():
+            style.append(("SPAN", (0, 1), (-1, 1)))
+        table.setStyle(TableStyle(style))
+        return [Paragraph(title_text, bold), table, Spacer(1, 4 * mm)]
+
     story = []
     if data.recipient.strip():
         story.append(Paragraph(_text(data.recipient), recipient))
@@ -154,8 +179,15 @@ def build_certificate_pdf(data: CertificateData) -> bytes:
             Paragraph("Pasport məlumatları", bold),
             line("Seriya və nömrəsi", data.passport_number, 22),
             line("Verən orqan", data.passport_issuer, 22),
-            line("Verildiyi tarix", data.passport_issue_date, 22),
-            line("Etibarlılıq tarixi", data.passport_expiry, 22),
+            line(
+                "Verildiyi tarix - etibarlılıq tarixi",
+                " - ".join(
+                    part
+                    for part in [data.passport_issue_date.strip(), data.passport_expiry.strip()]
+                    if part
+                ),
+                22,
+            ),
             line(
                 "Doğum tarixi, doğulduğu yer",
                 ", ".join(
@@ -174,11 +206,29 @@ def build_certificate_pdf(data: CertificateData) -> bytes:
                 "Müvəqqəti yaşamaq üçün icazənin müddətinin uzadılmasına əsas olmuş hallar",
                 section,
             ),
-            Paragraph("Şəxsin MYİ ilə bağlı müraciəti", bold),
-            Paragraph(_text(data.temporary_permit_history), body),
-            Spacer(1, 3 * mm),
-            Paragraph("Şəxsin DYİ ilə bağlı müraciəti", bold),
-            Paragraph(_text(data.permanent_permit_history), body),
+            *history_table(
+                "Şəxsin MYİ ilə bağlı müraciəti",
+                [
+                    "Müraciət tarixi",
+                    "Müraciət səbəbi",
+                    "Qərarın statusu",
+                    "Müraciətə əsas",
+                    "Verilmə tarixi",
+                    "Etibarlılıq tarixi",
+                ],
+                data.temporary_permit_history,
+            ),
+            *history_table(
+                "Şəxsin DYİ ilə bağlı müraciəti",
+                [
+                    "Müraciət tarixi",
+                    "Müraciət səbəbi",
+                    "Qərarın statusu",
+                    "Verilmə tarixi",
+                    "Etibarlılıq tarixi",
+                ],
+                data.permanent_permit_history,
+            ),
             PageBreak(),
             Paragraph("NƏTİCƏ", title),
             Paragraph(_text(data.conclusion), conclusion),

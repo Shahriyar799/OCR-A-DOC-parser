@@ -5,6 +5,7 @@ import os
 import json
 import uuid
 import threading
+import base64
 from html import escape
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -12,7 +13,9 @@ from pathlib import Path
 
 import gradio as gr
 
+from .certificate import build_certificate_pdf
 from .extractor import analyze_document
+from .schemas import CertificateData
 
 
 def extract_for_demo(file_path: str | None) -> dict:
@@ -133,7 +136,7 @@ def _form_values(file_path: str | None) -> tuple:
     if payload.get("error"):
         return (
             f"<div class='operator-error'>{escape(payload['error'])}</div>",
-            *([""] * 22),
+            *([""] * 28),
             "<p class='muted'>Emal nəticəsi gözlənilir.</p>",
             "",
         )
@@ -180,8 +183,89 @@ def _form_values(file_path: str | None) -> tuple:
         _value(payload, "address"),
         _value(payload, "basis_note"),
         _value(payload, "special_note"),
+        "",
+        "İdarə rəisi",
+        "",
+        _value(payload, "temporary_permit_history"),
+        _value(payload, "permanent_permit_history"),
+        _value(payload, "conclusion"),
         _cross_checks_html(payload),
         summary,
+    )
+
+
+def _certificate_preview(
+    first_name: str,
+    last_name: str,
+    foreign_name: str,
+    application_date: str,
+    citizenship: str,
+    sex: str,
+    passport_series: str,
+    passport_number: str,
+    passport_issuer: str,
+    passport_issue_date: str,
+    passport_expiry: str,
+    date_of_birth: str,
+    birth_place: str,
+    permit_basis: str,
+    basis_note: str,
+    special_note: str,
+    temporary_history: str,
+    permanent_history: str,
+    conclusion: str,
+    recipient: str,
+    manager_title: str,
+    manager_name: str,
+) -> str:
+    full_name = " ".join(part.strip() for part in (first_name, last_name) if part.strip())
+    data = {
+        "recipient": recipient,
+        "full_name": full_name or foreign_name,
+        "application_date": application_date,
+        "citizenship": citizenship,
+        "sex": sex,
+        "passport_number": " ".join(
+            part.strip() for part in (passport_series, passport_number) if part.strip()
+        ),
+        "passport_issuer": passport_issuer,
+        "passport_issue_date": passport_issue_date,
+        "passport_expiry": passport_expiry,
+        "date_of_birth": date_of_birth,
+        "birth_place": birth_place,
+        "permit_basis": permit_basis,
+        "basis_note": basis_note,
+        "special_note": special_note,
+        "temporary_permit_history": temporary_history,
+        "permanent_permit_history": permanent_history,
+        "conclusion": conclusion,
+        "manager_title": manager_title or "İdarə rəisi",
+        "manager_name": manager_name,
+    }
+    try:
+        backend_url = os.getenv("DEMO_BACKEND_URL", "").rstrip("/")
+        if backend_url:
+            request = Request(
+                f"{backend_url}/api/certificate",
+                data=json.dumps(data).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=90) as response:  # noqa: S310 - configured operator backend
+                pdf = response.read()
+        else:
+            pdf = build_certificate_pdf(CertificateData(**data))
+    except HTTPError as error:
+        return f"<div class='operator-error'>Arayış HTTP {error.code} xətası ilə yaradıla bilmədi.</div>"
+    except Exception:
+        return "<div class='operator-error'>Arayışın önizləməsi yaradıla bilmədi.</div>"
+
+    encoded = base64.b64encode(pdf).decode("ascii")
+    return (
+        "<div class='pdf-preview'>"
+        "<div class='pdf-preview-title'>Arayışın önizləməsi</div>"
+        f"<iframe title='Arayışın önizləməsi' src='data:application/pdf;base64,{encoded}#view=FitH'></iframe>"
+        "</div>"
     )
 
 
@@ -205,6 +289,10 @@ FORM_CSS = """
 .check.missing { background: #f4f0e4; color: #766229; }
 .check.conflict { background: #fde7e6; color: #a42725; }
 .muted { color: #697b88; }
+.preview-button { margin-top: 6px; }
+.pdf-preview { margin-top: 16px; border: 1px solid #20bfce; background: #fff; padding: 10px; }
+.pdf-preview-title { color: #155467; font-size: 17px; font-weight: 700; margin: 0 0 8px; }
+.pdf-preview iframe { border: 0; height: 850px; width: 100%; }
 """
 
 
@@ -275,6 +363,20 @@ with gr.Blocks(title="Sənəd Məlumat Çıxarışı", css=FORM_CSS) as demo:
                 address = gr.Textbox(label="Ünvan", lines=3)
 
     with gr.Group(elem_classes="form-panel"):
+        gr.HTML("<div class='panel-heading'>Arayış üçün əlavə məlumatlar</div>")
+        with gr.Column(elem_classes="panel-body"):
+            recipient = gr.Textbox(label="Ünvanlanan şəxs və vəzifə", lines=2)
+            with gr.Row():
+                manager_title = gr.Textbox(label="İmzalayanın vəzifəsi", value="İdarə rəisi")
+                manager_name = gr.Textbox(label="İmzalayanın adı")
+            with gr.Row():
+                temporary_history = gr.Textbox(label="Şəxsin MYİ ilə bağlı müraciəti", lines=3)
+                permanent_history = gr.Textbox(label="Şəxsin DYİ ilə bağlı müraciəti", lines=3)
+            conclusion = gr.Textbox(label="Nəticə", lines=3)
+            preview_button = gr.Button("Arayışı önizlə", variant="primary", elem_classes="preview-button")
+            certificate_preview = gr.HTML()
+
+    with gr.Group(elem_classes="form-panel"):
         gr.HTML("<div class='panel-heading'>Sənədlərarası yoxlama</div>")
         with gr.Column(elem_classes="panel-body"):
             summary = gr.HTML()
@@ -285,9 +387,22 @@ with gr.Blocks(title="Sənəd Məlumat Çıxarışı", css=FORM_CSS) as demo:
         passport_issuer, passport_issue_date, passport_expiry, first_name,
         last_name, full_name_foreign, father_name, citizenship, date_of_birth,
         birth_place, sex, application_type, permit_basis, application_date,
-        phone, email, address, basis_note, special_note, cross_checks, summary,
+        phone, email, address, basis_note, special_note, recipient,
+        manager_title, manager_name, temporary_history, permanent_history,
+        conclusion, cross_checks, summary,
     ]
     run.click(_form_values, inputs=document, outputs=output_components)
+    preview_button.click(
+        _certificate_preview,
+        inputs=[
+            first_name, last_name, full_name_foreign, application_date,
+            citizenship, sex, passport_series, passport_number, passport_issuer,
+            passport_issue_date, passport_expiry, date_of_birth, birth_place,
+            permit_basis, basis_note, special_note, temporary_history,
+            permanent_history, conclusion, recipient, manager_title, manager_name,
+        ],
+        outputs=certificate_preview,
+    )
 
 
 if __name__ == "__main__":
