@@ -5,15 +5,18 @@ services:
     container_name: document-intake
     restart: unless-stopped
     environment:
-      # The root filesystem is intentionally read-only; PaddleOCR stores its
-      # downloaded language models in the writable /tmp tmpfs at runtime.
-      PADDLE_PDX_CACHE_HOME: /tmp/paddlex
+      # Persist models: /tmp is deliberately wiped on every restart.
+      PADDLE_PDX_CACHE_HOME: /models/paddlex
+      HF_HOME: /models/huggingface
+      MODELSCOPE_CACHE: /models/modelscope
     ports:
       # Independent test endpoint. It does not use Traefik, n8n, or BiznesMəkan.
       - "${HOST_PORT:-8090}:8000"
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - paddle-models:/models
     security_opt:
       - no-new-privileges:true
     logging:
@@ -26,10 +29,16 @@ services:
     build: .
     command: ["python", "-m", "app.gradio_demo"]
     env_file: .env
+    environment:
+      PADDLE_PDX_CACHE_HOME: /models/paddlex
+      HF_HOME: /models/huggingface
+      MODELSCOPE_CACHE: /models/modelscope
     restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      - paddle-models:/models
     security_opt:
       - no-new-privileges:true
     logging:
@@ -37,3 +46,6 @@ services:
       options:
         max-size: 10m
         max-file: "2"
+
+volumes:
+  paddle-models:

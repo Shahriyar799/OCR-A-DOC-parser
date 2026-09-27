@@ -224,9 +224,12 @@ def _ocr_image(image: bytes) -> str:
                         _PADDLE_OCR[language] = PaddleOCR(
                             lang=language,
                             ocr_version="PP-OCRv5",
-                            use_doc_orientation_classify=True,
-                            use_doc_unwarping=True,
-                            use_textline_orientation=True,
+                            # GPT Vision performs the final layout and
+                            # handwriting review. Avoid loading the optional
+                            # document-enhancement models before OCR begins.
+                            use_doc_orientation_classify=False,
+                            use_doc_unwarping=False,
+                            use_textline_orientation=False,
                         )
                     results.extend(_PADDLE_OCR[language].predict(source.name))
         text: list[str] = []
@@ -359,7 +362,13 @@ def _image_part(image_bytes: bytes) -> dict:
 def vision_extract(pages: list[PageContent], document_name: str) -> tuple[str, PersonData]:
     from openai import OpenAI
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    # Do not leave the operator's browser waiting indefinitely when the
+    # provider is unavailable. The caller falls back to the local OCR result.
+    client = OpenAI(
+        api_key=os.environ["OPENAI_API_KEY"],
+        timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "180")),
+        max_retries=1,
+    )
     prompt = (
         "Sən miqrasiya sənədlərini vizual oxuyan dəqiq sənəd-analitika köməkçisisən. "
         "Bu bir sənədə aid səhifələrdir. Sənədin növünü tanı: passport, application_form, "
