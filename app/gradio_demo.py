@@ -49,7 +49,11 @@ def extract_for_demo(file_path: str | None) -> dict:
             # Keep the operator-facing request alive rather than discarding a
             # completed server result as a generic Gradio error.
             with urlopen(request, timeout=600) as response:  # noqa: S310 - configured operator backend
-                return json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8"))
+                # The operator view should present structured fields only;
+                # raw OCR text may contain unnecessary personal data.
+                payload.pop("text_preview", None)
+                return payload
 
         result = analyze_document(path.read_bytes(), mime_type)
         payload = result.model_dump()
